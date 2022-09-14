@@ -23,6 +23,7 @@ class DNSResolver:
         return self._resolve(domain, record_type, 0)
 
     def _resolve(self, domain: str, record_type: DNSRecordType, level: int, nameserver: bool = False) -> dns.message:
+        # print("resolve domain:", domain)
         resolution = None
         # query root servers for record
         for root_server in self.root_server_ips:
@@ -144,6 +145,7 @@ class DNSResolver:
                                             except Exception as e:
                                                 raise e
                                 break
+                break
             except Exception as e:
                 print("error while getting response for domain: {} from root: {}, ".format(domain, root_server), e)
                 continue
@@ -186,7 +188,7 @@ class DNSResolver:
 
 if __name__ == "__main__":
     test_domain = "www.netflix.com"
-    test_type = DNSRecordType.A
+    test_type = DNSRecordType.NS
     myresolver = DNSResolver()
     start_time = time.time()
     resp = myresolver.resolve(test_domain, test_type)
