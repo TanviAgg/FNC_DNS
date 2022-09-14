@@ -187,8 +187,8 @@ class DNSResolver:
 
 
 if __name__ == "__main__":
-    test_domain = "www.netflix.com"
-    test_type = DNSRecordType.NS
+    test_domain = "tmail.com"
+    test_type = DNSRecordType.A
     myresolver = DNSResolver()
     start_time = time.time()
     resp = myresolver.resolve(test_domain, test_type)
