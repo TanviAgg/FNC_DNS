@@ -13,6 +13,25 @@ AUTHORITY_SECTION = 2
 ADDITIONAL_SECTION = 3
 
 
+def print_dns_response(response: dns.message, query_time: int):
+    print("QUESTION SECTION:")
+    print(response.sections[QUESTION_SECTION][0].to_text())
+    print()
+    if len(response.sections[ANSWER_SECTION]) > 0:
+        print("ANSWER SECTION:")
+        for record in response.sections[ANSWER_SECTION]:
+            print(record.to_text())
+        print()
+    if len(response.sections[AUTHORITY_SECTION]) > 0:
+        print("AUTHORITY SECTION:")
+        for record in response.sections[AUTHORITY_SECTION]:
+            print(record.to_text())
+        print()
+    print("QUERY TIME: {} msec".format(query_time))
+    print("WHEN: ", datetime.today())
+    print("MSG SIZE rcvd: ", sys.getsizeof(response.to_text()))
+
+
 def match_type(type1: RecordType, type2: DNSRecordType) -> bool:
     if type1 == RecordType.A and type2 == DNSRecordType.A:
         return True
@@ -53,8 +72,7 @@ class DNSResolver:
                             continue
                         # try to resolve the given domain using address in record with required type
                         nameserver_address = record[0].address
-                        resp = self._query(query_domain=domain, nameserver=nameserver_address,
-                                           record_type=record_type)
+                        resp = self._query(query_domain=domain, nameserver=nameserver_address, record_type=record_type)
                         # if this query failed, try other records
                         if resp is None:
                             continue
@@ -77,7 +95,7 @@ class DNSResolver:
                             return resolution
                         # try to resolve the address for authoritative name server starting from root server
                         nameserver_name = record[0].target.to_text()
-                        resp = self._resolve(nameserver_name, DNSRecordType.A, 0)  # CUSTOM DIFF
+                        resp = self._resolve(nameserver_name, DNSRecordType.A, 0)
                         # if this query failed, try other records
                         if resp is None:
                             continue
@@ -88,8 +106,7 @@ class DNSResolver:
                         elif len(resp.sections[ANSWER_SECTION]) > 0:
                             for auth_record in resp.sections[ANSWER_SECTION]:
                                 # query the IP address of nameserver for this domain
-                                auth_resp = self._query(query_domain=domain,
-                                                        record_type=record_type,
+                                auth_resp = self._query(query_domain=domain, record_type=record_type,
                                                         nameserver=auth_record[0].address)
                                 if auth_resp is None:
                                     continue
@@ -110,14 +127,26 @@ class DNSResolver:
                 for record in resolution.sections[ANSWER_SECTION]:
                     while record.rdtype == RecordType.CNAME:
                         cname_address = record[0].target.to_text()
-                        resp = self._resolve(domain=cname_address, record_type=DNSRecordType.A,
-                                             level=0, nameserver=True)
+                        resp = self._resolve(domain=cname_address, record_type=record_type, level=0, nameserver=True)
                         # if this query failed, try other records
                         if resp is None:
                             continue
+                        # check answer section
+                        if len(resp.sections[ANSWER_SECTION]) == 0:
+                            # check authority section if present
+                            # sometimes we only get SOA records
+                            for c_record in resp.sections[AUTHORITY_SECTION]:
+                                if c_record.rdtype == RecordType.SOA:
+                                    resolution.sections[AUTHORITY_SECTION].append(c_record)
+                                    break
                         for c_record in resp.sections[ANSWER_SECTION]:
                             # if we got CNAME again, add to the answer to process further
                             if c_record.rdtype == RecordType.CNAME:
+                                resolution.sections[ANSWER_SECTION].append(c_record)
+                                break
+                            # if we got A record of cname, add to answer
+                            elif c_record.name.to_text() == cname_address and \
+                                    (c_record.rdtype == RecordType.A and record_type == DNSRecordType.A):
                                 resolution.sections[ANSWER_SECTION].append(c_record)
                                 break
                             # otherwise query server in this record to find CNAME
@@ -147,6 +176,7 @@ class DNSResolver:
                                                 resolution.sections[ANSWER_SECTION].extend(auth_resp.sections[ANSWER_SECTION])
                                                 break
                                 break
+
                         break
             break
 
@@ -168,32 +198,15 @@ class DNSResolver:
             print("error while getting response for domain: {} from root: {}, ".format(query_domain, nameserver), e)
             return None
 
-    def print_dns_response(self, response: dns.message, query_time: int):
-        print("QUESTION SECTION:")
-        print(response.sections[QUESTION_SECTION][0].to_text())
-        print("")
-        if len(response.sections[ANSWER_SECTION]) > 0:
-            print("ANSWER SECTION:")
-            for record in response.sections[ANSWER_SECTION]:
-                print(record.to_text())
-            print("")
-        if len(response.sections[AUTHORITY_SECTION]) > 0:
-            print("AUTHORITY SECTION:")
-            for record in response.sections[AUTHORITY_SECTION]:
-                print(record.to_text())
-            print("")
-        print("QUERY TIME: {} msec".format(round(query_time*1000)))
-        print("WHEN: ", datetime.today())
-        print("MSG SIZE rcvd: ", sys.getsizeof(response.to_text()))
-
 
 if __name__ == "__main__":
-    test_domain = "netflix.com"
+    test_domain = "www.cnn.com"
+    # test_domain = "cnn-tls.map.fastly.net"
     test_type = DNSRecordType.NS
     myresolver = DNSResolver()
     start_time = time.time()
     resp = myresolver.resolve(test_domain, test_type)
     end_time = time.time()
     time_taken = end_time-start_time
-    myresolver.print_dns_response(resp, time_taken)
+    print_dns_response(resp, round(time_taken*1000))
 
