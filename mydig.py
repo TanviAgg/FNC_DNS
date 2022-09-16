@@ -151,6 +151,7 @@ class DNSResolver:
                             elif c_record.name.to_text() == cname_address and \
                                     (c_record.rdtype == RecordType.A and record_type == DNSRecordType.A):
                                 resolution.sections[ANSWER_SECTION].append(c_record)
+                                resolution.sections[AUTHORITY_SECTION] = []
                                 # break
                                 print("return here 4")
                                 return resolution
@@ -165,6 +166,7 @@ class DNSResolver:
                                 # if we found answer, add it to the main response
                                 if len(ns_resp.sections[ANSWER_SECTION]) > 0:
                                     resolution.sections[ANSWER_SECTION].extend(ns_resp.sections[ANSWER_SECTION])
+                                    resolution.sections[AUTHORITY_SECTION] = []
                                     # print("return here 3")
                                     # return resolution   # cannot return because it breaks www.netflix.com A
                                 # otherwise check authority section
@@ -194,6 +196,7 @@ class DNSResolver:
 
                         break
             # break
+            print("return at end of root")
             return resolution
 
         return resolution
@@ -216,10 +219,10 @@ class DNSResolver:
 
 
 if __name__ == "__main__":
-    test_domain = "google.com"
+    test_domain = "www.netflix.com"
     # test_domain = "www.cnn.com"
     # test_domain = "cnn-tls.map.fastly.net"
-    test_type = DNSRecordType.MX
+    test_type = DNSRecordType.A
     myresolver = DNSResolver()
     start_time = time.time()
     resp = myresolver.resolve(test_domain, test_type)
