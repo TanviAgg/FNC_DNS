@@ -1,0 +1,62 @@
+==============================================================================================
+DNSSec Implementation
+==============================================================================================
+
+Overview:
+----------------------------------------------------------------------------------------------
+DNSSec adds a check at each point in the DNS protocol to verify the authenticity of a server based on the
+information received from the parent and the response returned by that server. Once this is verified, we can
+use the response and go to the next point, and also use the same information to verify the child server.
+This is how we build a chain of trust, starting at the root.
+
+It has been implemented in the same manner. Detailed steps have been explained below.
+
+Terminology:
+----------------------------------------------------------------------------------------------
+1. KSK (Key signing key) - this is used to verify a domain's key. It has a public-private pair.
+    Public key is used for verification.
+2. ZSK (Zone signing key) - this is used to verify a domain's non-key records. It has a public-private
+    pair. Public key is used for verification.
+3. DS (Delegation Signer) Record - this contains a hash of the child domain's PubKSK (used to verify
+    the child domain).
+4. RRSet (Resource Record Set) - The resource record which contains a DNSKEY type or A/NS/MX type
+    record information (in our case).
+4. RRSig (Resource Record Signature) - The digital signature of an RRSet.
+
+DNSSec resolution steps:
+Example: verisigninc.com.
+----------------------------------------------------------------------------------------------
+1. Start with the "." zone and obtain root KSK from a trusted source (root zone trust anchor).
+2. Query the root server for the "com." domain with DNSSec flag enabled.
+3. Root server returns:
+    a. RRSet of DNSKey records for the root (PubKSK and PubZSK)
+    b. RRSig of DNSKey records
+    c. DS record for "com." zone (this contains the hash of PubKSK of "com." zone)
+    d. RRSig of DS record
+    e. RRSet of nameservers for "com." zone.
+4. Process root server response:
+    a. We verify the root server's identity by checking the PubKSK RRSet's RRSig using the trust anchor KSK.
+    b. If it matches, root is verified. Next, we verify the RRSig of the DS record using root's PubZSK.
+5. Now we query the "com." nameserver for "verisigninc.com." records with DNSSec flag enabled.
+6. "com." nameserver returns:
+    a. RRSet of DNSKey records for the "com." (PubKSK and PubZSK)
+    b. RRSig of DNSKey records
+    c. DS record for "verisigninc.com." zone (this contains the hash of PubKSK of "verisigninc.com." zone)
+    d. RRSig of DS record
+    e. RRSet of nameservers for "verisigninc.com." zone.
+7. Process the "com." response:
+    a. Verify the "com." server's RRSet by checking the DNSKey RRSig using the "com." PubKSK.
+    b. Then we verify the "com." zone by matching the PubKSK against the DS record returned by root (parent) server.
+    c. Then we verify the DS RRSig for "verisigninc.com." using the PubZSK of "com.".
+8. Query the "verisigninc.com." nameserver for A records.
+9. The "verisigninc.com." nameserver returns:
+    a. RRSet of DNSKey records for the "verisigninc.com." (PubKSK and PubZSK)
+    b. RRSig of DNSKey records
+    c. RRSet of A records for "verisigninc.com.".
+    d. RRSig of A record set.
+10. Process the "verisigninc.com." response:
+    a. Verify the "verisigninc.com." server's RRSet by checking the DNSKey RRSig using the "verisigninc.com." PubKSK.
+    b. Then we verify the "verisigninc.com." zone by matching the PubKSK against the DS record returned by "com." (parent) server.
+    c. Then we verify the A record RRSig for "verisigninc.com." using the PubZSK of "verisigninc.com.".
+11. Return the DNS response.
+
