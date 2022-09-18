@@ -1,0 +1,145 @@
+==============================================================================================
+DNSSec Implementation
+==============================================================================================
+
+Overview:
+----------------------------------------------------------------------------------------------
+DNSSec adds a check at each point in the DNS protocol to verify the authenticity of a server based on the
+information received from the parent and the response returned by that server. Once this is verified, we can
+use the response and go to the next point, and also use the same information to verify the child server.
+This is how we build a chain of trust, starting at the root.
+
+It has been implemented in the same manner. Detailed steps have been explained below.
+
+Terminology:
+----------------------------------------------------------------------------------------------
+1. KSK (Key signing key) - this is used to verify a domain's key. It has a public-private pair.
+    Public key is used for verification.
+2. ZSK (Zone signing key) - this is used to verify a domain's non-key records. It has a public-private
+    pair. Public key is used for verification.
+3. DS (Delegation Signer) Record - this contains a hash of the child domain's PubKSK (used to verify
+    the child domain).
+4. RRSet (Resource Record Set) - The resource record which contains a DNSKEY type or A/NS/MX type
+    record information (in our case).
+4. RRSig (Resource Record Signature) - The digital signature of an RRSet.
+
+DNSSec resolution steps:
+Example: verisigninc.com.
+----------------------------------------------------------------------------------------------
+1. Start with the "." zone and obtain root KSK from a trusted source (root zone trust anchor).
+2. Query the root server for the "com." domain with DNSSec flag enabled.
+3. Root server returns:
+    a. RRSet of DNSKey records for the root (PubKSK and PubZSK)
+    b. RRSig of DNSKey records
+    c. DS record for "com." zone (this contains the hash of PubKSK of "com." zone)
+    d. RRSig of DS record
+    e. RRSet of nameservers for "com." zone.
+4. Process root server response:
+    a. We verify the root server's identity by checking the PubKSK RRSet's RRSig using the trust anchor KSK.
+    b. If it matches, root is verified. Next, we verify the RRSig of the DS record using root's PubZSK.
+5. Now we query the "com." nameserver for "verisigninc.com." records with DNSSec flag enabled.
+6. "com." nameserver returns:
+    a. RRSet of DNSKey records for the "com." (PubKSK and PubZSK)
+    b. RRSig of DNSKey records
+    c. DS record for "verisigninc.com." zone (this contains the hash of PubKSK of "verisigninc.com." zone)
+    d. RRSig of DS record
+    e. RRSet of nameservers for "verisigninc.com." zone.
+7. Process the "com." response:
+    a. Verify the "com." server's RRSet by checking the DNSKey RRSig using the "com." PubKSK.
+    b. Then we verify the "com." zone by matching the PubKSK against the DS record returned by root (parent) server.
+    c. Then we verify the DS RRSig for "verisigninc.com." using the PubZSK of "com.".
+8. Query the "verisigninc.com." nameserver for A records.
+9. The "verisigninc.com." nameserver returns:
+    a. RRSet of DNSKey records for the "verisigninc.com." (PubKSK and PubZSK)
+    b. RRSig of DNSKey records
+    c. RRSet of A records for "verisigninc.com.".
+    d. RRSig of A record set.
+10. Process the "verisigninc.com." response:
+    a. Verify the "verisigninc.com." server's RRSet by checking the DNSKey RRSig using the "verisigninc.com." PubKSK.
+    b. Then we verify the "verisigninc.com." zone by matching the PubKSK against the DS record returned by "com." (parent) server.
+    c. Then we verify the A record RRSig for "verisigninc.com." using the PubZSK of "verisigninc.com.".
+11. Return the DNS response.
+
+==============================================================================================
+RESOLVER RESPONSES
+==============================================================================================
+Case: DNSSec IS SUPPORTED AND VERIFIED
+----------------------------------------------------------------------------------------------
+Input: ./mydnssec verisigninc.com A
+----------------------------------------------------------------------------------------------
+Output:
+RRSig verification passed for DNSKey record for zone '.'
+RRSig verification passed for DS record from parent zone '.'
+Zone verification passed for zone '.'
+
+RRSig verification passed for DNSKey record for zone 'com.'
+RRSig verification passed for DS record from parent zone 'com.'
+Zone verification passed for zone 'com.'
+
+RRSig verification passed for DNSKey record for zone 'verisigninc.com.'
+RRSig verification passed for A record from parent zone 'verisigninc.com.'
+Zone verification passed for zone 'verisigninc.com.'
+
+QUESTION SECTION:
+verisigninc.com. IN A
+
+ANSWER SECTION:
+verisigninc.com. 60 IN A 209.131.162.45
+verisigninc.com. 60 IN A 69.58.187.40
+verisigninc.com. 60 IN RRSIG A 8 2 60 20221017231935 20220917231935 27235 verisigninc.com. Gdx+eQRT9V9O6Dbi9b4SsGYQZysATKwI tOTdBeLllwFNvtGqJc0iPBaVkzw9L7Yh LV+8uDzfiwm0jLK1sCmhDkpU+VhPtta+ ESJZqk56ThAWCkc2RzHUo5aRNGZAsm8k gmLqOf94V39fGLxqzfx+2KC1VdaPxe4r JY2kSwZsI1Y=
+
+AUTHORITY SECTION:
+verisigninc.com. 86400 IN NS av2.nstld.com.
+verisigninc.com. 86400 IN NS av4.nstld.com.
+verisigninc.com. 86400 IN NS av1.nstld.com.
+verisigninc.com. 86400 IN NS av3.nstld.com.
+verisigninc.com. 86400 IN RRSIG NS 8 2 86400 20221017231935 20220917231935 27235 verisigninc.com. Kw8uSFysPND3BNyot5XF0J5UAVsI+5Av L55ucSa+Q9tL+FpZT5TAXg3se3ieVhaq gnYUkm+scd2TO5htmVglbgYOZ/0LOjiG PiYIL/BPRpQ102juZ1xKb4J8el/ddbqj KrdeWERaPOfYdUTCD8T4afpSZqWOwmBF 1fI8Kivd7T4=
+
+QUERY TIME: 125 msec
+WHEN:  2022-09-17 23:02:01.269923
+MSG SIZE rcvd:  991
+==============================================================================================
+Case: DNSSec IS NOT SUPPORTED
+----------------------------------------------------------------------------------------------
+Input: ./mydnssec cnn.com A
+----------------------------------------------------------------------------------------------
+Output:
+RRSig verification passed for DNSKey record for zone '.'
+RRSig verification passed for DS record from parent zone '.'
+Zone verification passed for zone '.'
+
+RRSig verification passed for DNSKey record for zone 'com.'
+DNSSec not supported since we could not find DS record from parent zone 'com.'
+DNSSec verification failed for nameserver with ip 192.5.6.30
+==============================================================================================
+Case: DNSSec VERIFICATION FAILED
+----------------------------------------------------------------------------------------------
+Input: ./mydnssec dnssec-failed.org A
+----------------------------------------------------------------------------------------------
+Output:
+RRSig verification passed for DNSKey record for zone '.'
+RRSig verification passed for DS record from parent zone '.'
+Zone verification passed for zone '.'
+
+RRSig verification passed for DNSKey record for zone 'org.'
+RRSig verification passed for DS record from parent zone 'org.'
+Zone verification passed for zone 'org.'
+
+Resolving address for dns104.comcast.net. starting from root
+RRSig verification passed for DNSKey record for zone '.'
+RRSig verification passed for DS record from parent zone '.'
+Zone verification passed for zone '.'
+
+RRSig verification passed for DNSKey record for zone 'net.'
+RRSig verification passed for DS record from parent zone 'net.'
+Zone verification passed for zone 'net.'
+
+RRSig verification passed for DNSKey record for zone 'comcast.net.'
+RRSig verification passed for A record from parent zone 'comcast.net.'
+Zone verification passed for zone 'comcast.net.'
+
+RRSig verification passed for DNSKey record for zone 'dnssec-failed.org.'
+RRSig verification passed for A record from parent zone 'dnssec-failed.org.'
+Zone verification failed for zone 'dnssec-failed.org.'
+DNSSec verification failed for auth nameserver with ip 68.87.68.244
+----------------------------------------------------------------------------------------------

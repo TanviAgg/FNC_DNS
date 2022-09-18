@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime
 
-from data import DNSRecordType, ROOT_SERVER_IPS
+from data import DNSRecordType, ROOT_SERVER_IPS, ROOT_ANCHORS
 import dns.message
 import dns.query
 from dns.rdatatype import RdataType as RecordType
@@ -42,6 +42,154 @@ def match_type(type1: RecordType, type2: DNSRecordType) -> bool:
     return False
 
 
+def getPubKSK(record):
+    """ extract the public key signing key from record set """
+    for r in record:
+        if r.flags == 257:
+            return r
+    return None
+
+
+# def getPubZSK(record):
+#     """ extract the public zone signing key from record set """
+#     return ""
+
+
+def getDNSKeyRecord(response):
+    """ return the DNSKey record from answer """
+    # check answer section for DNSKey
+    if len(response.sections[ANSWER_SECTION]) > 0:
+        for record in response.sections[ANSWER_SECTION]:
+            if record.rdtype == dns.rdatatype.DNSKEY:
+                return record
+    return None
+
+
+def getRRSig(response, authority=False):
+    """ extract the RRSig from the response """
+    # check answer section for DNSKey RRSig
+    if not authority:
+        if len(response.sections[ANSWER_SECTION]) > 0:
+            for record in response.sections[ANSWER_SECTION]:
+                if record.rdtype == dns.rdatatype.RRSIG:
+                    return record
+    # check authority section for DS RRSig
+    else:
+        if len(response.sections[AUTHORITY_SECTION]) > 0:
+            for record in response.sections[AUTHORITY_SECTION]:
+                if record.rdtype == dns.rdatatype.RRSIG:
+                    return record
+    return None
+
+
+def getRRSet(response, record_type):
+    # check answer section for A record
+    if record_type == dns.rdatatype.A:
+        if len(response.sections[ANSWER_SECTION]) > 0:
+            for record in response.sections[ANSWER_SECTION]:
+                if record.rdtype == dns.rdatatype.A:
+                    return record
+    # check authority section for DS record
+    if record_type == dns.rdatatype.DS:
+        if len(response.sections[AUTHORITY_SECTION]) > 0:
+            for record in response.sections[AUTHORITY_SECTION]:
+                if record.rdtype == dns.rdatatype.DS or record.rdtype == dns.rdatatype.NSEC:
+                    return record
+
+    return None
+
+
+def verify_signature(rrset, rrsig, dnskey):
+    """ verify that the RRSet's RRSig was signed by the private key corresponding to given public key """
+    try:
+        # n = dnskey.name
+        dns.dnssec.validate(rrset=rrset, rrsigset=rrsig, keys={dnskey.name: dnskey})
+        return True
+    except dns.dnssec.ValidationFailure as e:
+        return False
+
+
+def verify_fingerprint(pubkey, ds_record):
+    """ verify that the hash of the given public key matches the DS record from parent """
+    try:
+        domain = "."
+        parent_record_text = ROOT_ANCHORS[1].lower()
+        hash_alg = 'SHA256'
+        if ds_record is not None:
+            domain = ds_record.name.to_text()
+            parent_record_text = ds_record[0].to_text()
+            if ds_record[0].digest_type == 1:
+                hash_alg = 'SHA1'
+        hash_value = dns.dnssec.make_ds(name=domain, key=pubkey, algorithm=hash_alg)
+        if hash_value.to_text() == parent_record_text:
+            return True
+        else:
+            return False
+    except dns.dnssec.ValidationFailure as e:
+        return False
+
+
+def hasARecord(response):
+    if len(response.sections[ANSWER_SECTION]) > 0:
+        for record in response.sections[ANSWER_SECTION]:
+            if record.rdtype == dns.rdatatype.A:
+                return True
+    return False
+
+
+def verify_record_and_zone(dns_key_response, dns_response, parent_record=None):
+    """ verification of DNSKEY and response """
+    dnsKeyRecord = getDNSKeyRecord(dns_key_response)
+    if dnsKeyRecord is None:
+        print("DNSSec not supported since we could not find DNSKey record for zone '{}'".
+              format('.' if parent_record is None else parent_record.name.to_text()))
+        return False, None
+    pubKSK = getPubKSK(dnsKeyRecord)
+
+    # verify RRSig of DNSKey record
+    dnskey_rrsig = getRRSig(dns_key_response)
+    rrsig_verified = verify_signature(dnsKeyRecord, dnskey_rrsig, dnsKeyRecord)
+    if not rrsig_verified:
+        print("RRSig verification failed for DNSKey record for zone '{}'".format(dnsKeyRecord.name.to_text()))
+        return False, None
+    print("RRSig verification passed for DNSKey record for zone '{}'".format(dnsKeyRecord.name.to_text()))
+
+    # verify RRSig of A/DS record
+    if hasARecord(dns_response):
+        a_rrsig = getRRSig(dns_response)
+        parent_rrset = getRRSet(dns_response, dns.rdatatype.A)
+        if parent_rrset is None:
+            print("DNSSec not supported since we could not find A record from parent zone '{}'".format(
+                dnsKeyRecord.name.to_text()))
+            return False, None
+        rrsig_verified = verify_signature(parent_rrset, a_rrsig, dnsKeyRecord)
+        if not rrsig_verified:
+            print("RRSig verification failed for A record from parent zone '{}'".format(dnsKeyRecord.name.to_text()))
+            return False, None
+        print("RRSig verification passed for A record from parent zone '{}'".format(dnsKeyRecord.name.to_text()))
+    else:
+        ds_rrsig = getRRSig(dns_response, authority=True)
+        parent_rrset = getRRSet(dns_response, dns.rdatatype.DS)
+        if parent_rrset is None:
+            print("DNSSec not supported since we could not find DS record from parent zone '{}'".format(
+                dnsKeyRecord.name.to_text()))
+            return False, None
+        rrsig_verified = verify_signature(parent_rrset, ds_rrsig, dnsKeyRecord)
+        if not rrsig_verified:
+            print("RRSig verification failed for DS record from parent zone '{}'".format(dnsKeyRecord.name.to_text()))
+            return False, None
+        print("RRSig verification passed for DS record from parent zone '{}'".format(dnsKeyRecord.name.to_text()))
+
+    # verify zone by checking hash of PubKSK and DS record from parent
+    zone_verified = verify_fingerprint(pubKSK, parent_record)
+    if not zone_verified:
+        print("Zone verification failed for zone '{}'".format(dnsKeyRecord.name.to_text()))
+        return False, None
+    print("Zone verification passed for zone '{}'".format(dnsKeyRecord.name.to_text()))
+    print()
+    return True, parent_rrset
+
+
 class DNSSecResolver:
     def __init__(self, use_tcp=False):
         self.root_server_ips = ROOT_SERVER_IPS
@@ -56,10 +204,17 @@ class DNSSecResolver:
         resolution = None
         # query root servers for record
         for root_server in self.root_server_ips:
+            root_dns_key_resp = self._query(query_domain=".", nameserver=root_server, record_type=DNSRecordType.DNSKEY)
             resolution = self._query(query_domain=domain, nameserver=root_server, record_type=record_type)
             # if this query failed, try other root servers
-            if resolution is None:
+            if root_dns_key_resp is None or resolution is None:
                 continue
+
+            # DNSSec validation
+            verified, parent_record = verify_record_and_zone(dns_key_response=root_dns_key_resp, dns_response=resolution)
+            if not verified:
+                print("DNSSec verification failed for root server with ip {}".format(root_server))
+                return None
 
             # check if answer is present
             while len(resolution.sections[ANSWER_SECTION]) == 0:
@@ -72,10 +227,21 @@ class DNSSecResolver:
                             continue
                         # try to resolve the given domain using address in record with required type
                         nameserver_address = record[0].address
+                        dns_key_resp = self._query(query_domain=parent_record.name.to_text(),
+                                                   nameserver=nameserver_address,
+                                                   record_type=DNSRecordType.DNSKEY)
                         resp = self._query(query_domain=domain, nameserver=nameserver_address, record_type=record_type)
                         # if this query failed, try other records
-                        if resp is None:
+                        if dns_key_resp is None or resp is None:
                             continue
+                        # DNSSec validation
+                        validated, parent_record = verify_record_and_zone(dns_key_response=dns_key_resp,
+                                                                          dns_response=resp,
+                                                                          parent_record=parent_record)
+                        if not validated:
+                            print("DNSSec verification failed for nameserver with ip {}".format(nameserver_address))
+                            return None
+
                         # otherwise check answer
                         if len(resp.sections[ANSWER_SECTION]) > 0:
                             if nameserver and resp.sections[ANSWER_SECTION][0].rdtype == RecordType.CNAME:
@@ -95,6 +261,7 @@ class DNSSecResolver:
                             return resolution
                         # try to resolve the address for authoritative name server starting from root server
                         nameserver_name = record[0].target.to_text()
+                        print("Resolving address for {} starting from root".format(nameserver_name))
                         resp = self._resolve(nameserver_name, DNSRecordType.A, 0)
                         # if this query failed, try other records
                         if resp is None:
@@ -106,10 +273,22 @@ class DNSSecResolver:
                         elif len(resp.sections[ANSWER_SECTION]) > 0:
                             for auth_record in resp.sections[ANSWER_SECTION]:
                                 # query the IP address of nameserver for this domain
+                                dns_key_resp = self._query(query_domain=parent_record.name.to_text(),
+                                                           nameserver=auth_record[0].address,
+                                                           record_type=DNSRecordType.DNSKEY)
                                 auth_resp = self._query(query_domain=domain, record_type=record_type,
                                                         nameserver=auth_record[0].address)
-                                if auth_resp is None:
+                                if dns_key_resp is None or auth_resp is None:
                                     continue
+
+                                # DNSSec validation
+                                validated, parent_record = verify_record_and_zone(dns_key_response=dns_key_resp,
+                                                                                  dns_response=auth_resp,
+                                                                                  parent_record=parent_record)
+                                if not validated:
+                                    print("DNSSec verification failed for auth nameserver with ip {}".format(
+                                        auth_record[0].address))
+                                    return None
                                 resolution = auth_resp
                                 break
             # ============= ANSWER SECTION ==============
@@ -218,15 +397,16 @@ class DNSSecResolver:
 
 
 if __name__ == "__main__":
-    test_domain = "verisigninc.com"
-    # test_domain = "www.cnn.com"
-    # test_domain = "cnn-tls.map.fastly.net"
+    test_domain = "dnssec-failed.org"
+    # test_domain = "cnn.com"
+    # test_domain = "verisigninc.com"
     test_type = DNSRecordType.A
     myresolver = DNSSecResolver()
     start_time = time.time()
-    resp = myresolver._query(query_domain="verisigninc.com.", nameserver="199.7.91.13", record_type=DNSRecordType.DNSKEY)
     resp = myresolver.resolve(test_domain, test_type)
     end_time = time.time()
     time_taken = end_time-start_time
-    print_dns_response(resp, round(time_taken*1000))
+    if resp is not None:
+        print_dns_response(resp, round(time_taken*1000))
+
 
