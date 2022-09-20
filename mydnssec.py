@@ -1,46 +1,10 @@
 import sys
-from datetime import datetime
-
-from data import DNSRecordType, ROOT_SERVER_IPS, ROOT_ANCHORS, get_record_type
+from data import DNSRecordType, ROOT_SERVER_IPS, ROOT_ANCHORS, get_record_type, match_type, print_dns_response, \
+    ANSWER_SECTION, AUTHORITY_SECTION, ADDITIONAL_SECTION
 import dns.message
 import dns.query
 from dns.rdatatype import RdataType as RecordType
 import time
-
-
-QUESTION_SECTION = 0
-ANSWER_SECTION = 1
-AUTHORITY_SECTION = 2
-ADDITIONAL_SECTION = 3
-
-
-def print_dns_response(response: dns.message, query_time: int):
-    print("QUESTION SECTION:")
-    print(response.sections[QUESTION_SECTION][0].to_text())
-    print()
-    if len(response.sections[ANSWER_SECTION]) > 0:
-        print("ANSWER SECTION:")
-        for record in response.sections[ANSWER_SECTION]:
-            print(record.to_text())
-        print()
-    if len(response.sections[AUTHORITY_SECTION]) > 0:
-        print("AUTHORITY SECTION:")
-        for record in response.sections[AUTHORITY_SECTION]:
-            print(record.to_text())
-        print()
-    print("QUERY TIME: {} msec".format(query_time))
-    print("WHEN: ", datetime.today())
-    print("MSG SIZE rcvd: ", sys.getsizeof(response.to_text()))
-
-
-def match_type(type1: RecordType, type2: DNSRecordType) -> bool:
-    if type1 == RecordType.A and type2 == DNSRecordType.A:
-        return True
-    if type1 == RecordType.NS and type2 == DNSRecordType.NS:
-        return True
-    if type1 == RecordType.MX and type2 == DNSRecordType.MX:
-        return True
-    return False
 
 
 def getPubKSK(record):
@@ -49,11 +13,6 @@ def getPubKSK(record):
         if r.flags == 257:
             return r
     return None
-
-
-# def getPubZSK(record):
-#     """ extract the public zone signing key from record set """
-#     return ""
 
 
 def getDNSKeyRecord(response):
@@ -84,6 +43,7 @@ def getRRSig(response, authority=False):
 
 
 def getRRSet(response, record_type):
+    """ return RRSet corresponding to A record / DS record as requested """
     # check answer section for A record
     if record_type == dns.rdatatype.A:
         if len(response.sections[ANSWER_SECTION]) > 0:
@@ -103,7 +63,6 @@ def getRRSet(response, record_type):
 def verify_signature(rrset, rrsig, dnskey):
     """ verify that the RRSet's RRSig was signed by the private key corresponding to given public key """
     try:
-        # n = dnskey.name
         dns.dnssec.validate(rrset=rrset, rrsigset=rrsig, keys={dnskey.name: dnskey})
         return True
     except dns.dnssec.ValidationFailure as e:
@@ -139,7 +98,12 @@ def hasARecord(response):
 
 
 def verify_record_and_zone(dns_key_response, dns_response, parent_record=None):
-    """ verification of DNSKEY and response """
+    """
+    core DNSSec verification logic
+    1. RRSig validation for DNSKEY record
+    2. RRSig validation for A/DS record
+    3. Zone verification
+    """
     dnsKeyRecord = getDNSKeyRecord(dns_key_response)
     if dnsKeyRecord is None:
         print("DNSSec not supported since we could not find DNSKey record for zone '{}'".
@@ -198,9 +162,9 @@ class DNSSecResolver:
         self.timeout = 5
 
     def resolve(self, domain: str, record_type: DNSRecordType) -> dns.message:
-        return self._resolve(domain, record_type, 0)
+        return self._resolve(domain, record_type)
 
-    def _resolve(self, domain: str, record_type: DNSRecordType, level: int, nameserver: bool = False) -> dns.message:
+    def _resolve(self, domain: str, record_type: DNSRecordType, nameserver: bool = False) -> dns.message:
         # print("resolve domain:", domain)
         resolution = None
         # query root servers for record
@@ -210,7 +174,6 @@ class DNSSecResolver:
             # if this query failed, try other root servers
             if root_dns_key_resp is None or resolution is None:
                 continue
-
             # DNSSec validation
             verified, parent_record = verify_record_and_zone(dns_key_response=root_dns_key_resp, dns_response=resolution)
             if not verified:
@@ -220,7 +183,6 @@ class DNSSecResolver:
             # check if answer is present
             while len(resolution.sections[ANSWER_SECTION]) == 0:
                 # ============= ADDITIONAL SECTION ==============
-                # check additional section
                 # process all A type records (ignore AAAA)
                 if len(resolution.sections[ADDITIONAL_SECTION]) > 0:
                     for record in resolution.sections[ADDITIONAL_SECTION]:
@@ -252,7 +214,6 @@ class DNSSecResolver:
                         resolution = resp
                         break
                 # ============= AUTHORITY SECTION ==============
-                # check authority section
                 # if any nameservers are returned, try to resolve them or else return SOA
                 elif len(resolution.sections[AUTHORITY_SECTION]) > 0:
                     for record in resolution.sections[AUTHORITY_SECTION]:
@@ -263,7 +224,7 @@ class DNSSecResolver:
                         # try to resolve the address for authoritative name server starting from root server
                         nameserver_name = record[0].target.to_text()
                         print("Resolving address for {} starting from root".format(nameserver_name))
-                        resp = self._resolve(nameserver_name, DNSRecordType.A, 0)
+                        resp = self._resolve(nameserver_name, DNSRecordType.A)
                         # if this query failed, try other records
                         if resp is None:
                             continue
@@ -281,7 +242,6 @@ class DNSSecResolver:
                                                         nameserver=auth_record[0].address)
                                 if dns_key_resp is None or auth_resp is None:
                                     continue
-
                                 # DNSSec validation
                                 validated, parent_record = verify_record_and_zone(dns_key_response=dns_key_resp,
                                                                                   dns_response=auth_resp,
@@ -293,7 +253,6 @@ class DNSSecResolver:
                                 resolution = auth_resp
                                 break
             # ============= ANSWER SECTION ==============
-            # check answer section
             # 1. if answer section contains desired record type, return resolution answer
             # 2. if it contains SOA type record, return answer
             if len(resolution.sections[ANSWER_SECTION]) > 0:
@@ -307,19 +266,16 @@ class DNSSecResolver:
                 for record in resolution.sections[ANSWER_SECTION]:
                     while record.rdtype == RecordType.CNAME:
                         cname_address = record[0].target.to_text()
-                        resp = self._resolve(domain=cname_address, record_type=record_type, level=0, nameserver=True)
+                        resp = self._resolve(domain=cname_address, record_type=record_type, nameserver=True)
                         # if this query failed, try other records
                         if resp is None:
                             continue
                         # check answer section
                         if len(resp.sections[ANSWER_SECTION]) == 0:
-                            # check authority section if present
-                            # sometimes we only get SOA records
+                            # check authority section if present, sometimes we only get SOA records
                             for c_record in resp.sections[AUTHORITY_SECTION]:
                                 if c_record.rdtype == RecordType.SOA:
                                     resolution.sections[AUTHORITY_SECTION] = resp.sections[AUTHORITY_SECTION]
-                                    # break
-                                    print("return here")
                                     return resolution
                         for c_record in resp.sections[ANSWER_SECTION]:
                             # if we got CNAME again, add to the answer to process further
@@ -331,60 +287,43 @@ class DNSSecResolver:
                                     (c_record.rdtype == RecordType.A and record_type == DNSRecordType.A):
                                 resolution.sections[ANSWER_SECTION].append(c_record)
                                 resolution.sections[AUTHORITY_SECTION] = []
-                                # break
-                                print("return here 4")
                                 return resolution
                             # otherwise query server in this record to find CNAME
                             else:
                                 nameserver_address = c_record[0].address
+                                ns_dns_key_resp = self._query(query_domain=parent_record.name.to_text(),
+                                                              nameserver=nameserver_address,
+                                                              record_type=DNSRecordType.DNSKEY)
                                 ns_resp = self._query(query_domain=cname_address,
                                                       nameserver=nameserver_address,
                                                       record_type=record_type)
-                                if ns_resp is None:
+                                if ns_dns_key_resp is None or ns_resp is None:
                                     continue
+                                # DNSSec validation
+                                validated, parent_record = verify_record_and_zone(dns_key_response=ns_dns_key_resp,
+                                                                                  dns_response=ns_resp,
+                                                                                  parent_record=parent_record)
+                                if not validated:
+                                    print("DNSSec verification failed for auth nameserver with ip {}".format(
+                                        nameserver_address))
+                                    return None
                                 # if we found answer, add it to the main response
                                 if len(ns_resp.sections[ANSWER_SECTION]) > 0:
                                     resolution.sections[ANSWER_SECTION].extend(ns_resp.sections[ANSWER_SECTION])
                                     resolution.sections[AUTHORITY_SECTION] = []
-                                    # print("return here 3")
-                                    # return resolution   # cannot return because it breaks www.netflix.com A
                                 # otherwise check authority section
                                 elif len(ns_resp.sections[AUTHORITY_SECTION]) > 0:
                                     # if we are not looking for A record, add records to main response
                                     if record_type == DNSRecordType.NS or record_type == DNSRecordType.MX:
                                         resolution.sections[AUTHORITY_SECTION] = ns_resp.sections[AUTHORITY_SECTION]
-                                        print("return here 2")
                                         return resolution
-                                    # otherwise try to resolve this server starting from root
-                                    else:
-                                        # for auth_record in ns_resp.sections[AUTHORITY_SECTION]:
-                                        #     auth_resp = self._resolve(domain=auth_record[0].name,
-                                        #                               record_type=DNSRecordType.A,
-                                        #                               level=0,
-                                        #                               nameserver=True)
-                                        #     if len(auth_resp.sections[ANSWER_SECTION]) > 0:
-                                        #         resolution.sections[ANSWER_SECTION].extend(auth_resp.sections[ANSWER_SECTION])
-                                        #         # break
-                                        #         print("return here 5")
-                                        #         return resolution
-                                        print("reaching here")
-                                else:
-                                    print("return here 6")
-                                    return resolution
                                 break
-
                         break
-            # break
-            print("return at end of root")
             return resolution
 
         return resolution
 
-    def _query(self, query_domain: str, nameserver: str, record_type: DNSRecordType = DNSRecordType.A,
-               level: int = 0) -> dns.message:
-        if level > 0:
-            subdomain = query_domain.split('.')[-level:]
-            query_domain = '.'.join(subdomain)
+    def _query(self, query_domain: str, nameserver: str, record_type: DNSRecordType = DNSRecordType.A) -> dns.message:
         query = dns.message.make_query(qname=query_domain, rdtype=record_type.value, want_dnssec=True)
         try:
             if self.use_tcp:
@@ -393,7 +332,7 @@ class DNSSecResolver:
                 response = dns.query.udp(q=query, where=nameserver, timeout=self.timeout)
             return response
         except Exception as e:
-            print("error while getting response for domain: {} from root: {}, ".format(query_domain, nameserver), e)
+            print("error while getting response for domain: {} from server: {}, ".format(query_domain, nameserver), e)
             return None
 
 
@@ -418,5 +357,3 @@ if __name__ == "__main__":
     time_taken = end_time-start_time
     if resp is not None:
         print_dns_response(resp, round(time_taken*1000))
-
-

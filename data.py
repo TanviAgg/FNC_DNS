@@ -1,4 +1,13 @@
 from enum import Enum
+from dns.rdatatype import RdataType as RecordType
+import sys
+from datetime import datetime
+import dns.message
+
+QUESTION_SECTION = 0
+ANSWER_SECTION = 1
+AUTHORITY_SECTION = 2
+ADDITIONAL_SECTION = 3
 
 
 class DNSRecordType(Enum):
@@ -28,3 +37,32 @@ def get_record_type(record_type: str) -> DNSRecordType:
         return DNSRecordType.MX
     else:
         return None
+
+
+def match_type(type1: RecordType, type2: DNSRecordType) -> bool:
+    if type1 == RecordType.A and type2 == DNSRecordType.A:
+        return True
+    if type1 == RecordType.NS and type2 == DNSRecordType.NS:
+        return True
+    if type1 == RecordType.MX and type2 == DNSRecordType.MX:
+        return True
+    return False
+
+
+def print_dns_response(response: dns.message, query_time: int):
+    print("QUESTION SECTION:")
+    print(response.sections[QUESTION_SECTION][0].to_text())
+    print()
+    if len(response.sections[ANSWER_SECTION]) > 0:
+        print("ANSWER SECTION:")
+        for record in response.sections[ANSWER_SECTION]:
+            print(record.to_text())
+        print()
+    if len(response.sections[AUTHORITY_SECTION]) > 0:
+        print("AUTHORITY SECTION:")
+        for record in response.sections[AUTHORITY_SECTION]:
+            print(record.to_text())
+        print()
+    print("QUERY TIME: {} msec".format(query_time))
+    print("WHEN: ", datetime.today())
+    print("MSG SIZE rcvd: ", sys.getsizeof(response.to_text()))
