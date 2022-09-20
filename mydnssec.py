@@ -1,11 +1,12 @@
 import sys
 from datetime import datetime
 
-from data import DNSRecordType, ROOT_SERVER_IPS, ROOT_ANCHORS
+from data import DNSRecordType, ROOT_SERVER_IPS, ROOT_ANCHORS, get_record_type
 import dns.message
 import dns.query
 from dns.rdatatype import RdataType as RecordType
 import time
+
 
 QUESTION_SECTION = 0
 ANSWER_SECTION = 1
@@ -397,13 +398,22 @@ class DNSSecResolver:
 
 
 if __name__ == "__main__":
-    test_domain = "dnssec-failed.org"
+    args = sys.argv
+    if len(args) != 3:
+        print("Enter 2 arguments: domain name and record type")
+        exit(0)
+    test_domain = args[1]
+    record_type = get_record_type(args[2])
+    if record_type is None:
+        print("Invalid record type: please select A/NS/MX")
+        exit(0)
+    # test_domain = "dnssec-failed.org"
     # test_domain = "cnn.com"
     # test_domain = "verisigninc.com"
-    test_type = DNSRecordType.A
+    # record_type = DNSRecordType.A
     myresolver = DNSSecResolver()
     start_time = time.time()
-    resp = myresolver.resolve(test_domain, test_type)
+    resp = myresolver.resolve(test_domain, record_type)
     end_time = time.time()
     time_taken = end_time-start_time
     if resp is not None:

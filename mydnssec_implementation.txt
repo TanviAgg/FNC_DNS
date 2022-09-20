@@ -65,7 +65,7 @@ RESOLVER RESPONSES
 ==============================================================================================
 Case: DNSSec IS SUPPORTED AND VERIFIED
 ----------------------------------------------------------------------------------------------
-Input: ./mydnssec verisigninc.com A
+Input: python mydnssec.py verisigninc.com A
 ----------------------------------------------------------------------------------------------
 Output:
 RRSig verification passed for DNSKey record for zone '.'
@@ -101,7 +101,7 @@ MSG SIZE rcvd:  991
 ==============================================================================================
 Case: DNSSec IS NOT SUPPORTED
 ----------------------------------------------------------------------------------------------
-Input: ./mydnssec cnn.com A
+Input: python mydnssec.py cnn.com A
 ----------------------------------------------------------------------------------------------
 Output:
 RRSig verification passed for DNSKey record for zone '.'
@@ -114,7 +114,7 @@ DNSSec verification failed for nameserver with ip 192.5.6.30
 ==============================================================================================
 Case: DNSSec VERIFICATION FAILED
 ----------------------------------------------------------------------------------------------
-Input: ./mydnssec dnssec-failed.org A
+Input: python mydnssec.py dnssec-failed.org A
 ----------------------------------------------------------------------------------------------
 Output:
 RRSig verification passed for DNSKey record for zone '.'

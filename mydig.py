@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime
 
-from data import DNSRecordType, ROOT_SERVER_IPS
+from data import DNSRecordType, ROOT_SERVER_IPS, get_record_type
 import dns.message
 import dns.query
 from dns.rdatatype import RdataType as RecordType
@@ -219,13 +219,22 @@ class DNSResolver:
 
 
 if __name__ == "__main__":
-    test_domain = "www.netflix.com"
+    args = sys.argv
+    if len(args) != 3:
+        print("Enter 2 arguments: domain name and record type")
+        exit(0)
+    test_domain = args[1]
+    record_type = get_record_type(args[2])
+    if record_type is None:
+        print("Invalid record type: please select A/NS/MX")
+        exit(0)
+    # test_domain = "www.netflix.com"
     # test_domain = "www.cnn.com"
     # test_domain = "cnn-tls.map.fastly.net"
-    test_type = DNSRecordType.A
+    # record_type = DNSRecordType.A
     myresolver = DNSResolver()
     start_time = time.time()
-    resp = myresolver.resolve(test_domain, test_type)
+    resp = myresolver.resolve(test_domain, record_type)
     end_time = time.time()
     time_taken = end_time-start_time
     print_dns_response(resp, round(time_taken*1000))
