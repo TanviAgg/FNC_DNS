@@ -1,6 +1,6 @@
 ==================================================================================
 Case: Resolve A record
-Input: ./mydig.py google.com A
+Input: python mydig.py google.com A
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:
@@ -14,7 +14,7 @@ WHEN:  2022-09-16 16:36:22.777855
 MSG SIZE rcvd:  192
 ==================================================================================
 Case: Resolve NS record
-Input: ./mydig.py google.com NS
+Input: python mydig.py google.com NS
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:
@@ -31,7 +31,7 @@ WHEN:  2022-09-16 16:36:36.778082
 MSG SIZE rcvd:  698
 ==================================================================================
 Case: Resolve MX record
-Input: ./mydig.py google.com MX
+Input: python mydig.py google.com MX
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:
@@ -45,7 +45,7 @@ WHEN:  2022-09-16 16:36:52.807002
 MSG SIZE rcvd:  610
 ==================================================================================
 Case: Resolve multiple CNAME in answer for NS record
-Input: ./mydig.py www.netflix.com NS
+Input: python mydig.py www.netflix.com NS
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:
@@ -64,7 +64,7 @@ WHEN:  2022-09-16 16:34:31.337759
 MSG SIZE rcvd:  541
 ==================================================================================
 Case: Resolve A record
-Input: ./mydig.py www.cnn.com A
+Input: python mydig.py www.cnn.com A
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:
@@ -79,7 +79,7 @@ WHEN:  2022-09-16 16:28:45.468057
 MSG SIZE rcvd:  253
 ==================================================================================
 Case: Resolve NS record
-Input: ./mydig.py www.cnn.com NS
+Input: python mydig.py www.cnn.com NS
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:
@@ -96,7 +96,7 @@ WHEN:  2022-09-16 16:30:30.375552
 MSG SIZE rcvd:  300
 ==================================================================================
 Case: Resolve multiple CNAME in answer
-Input: ./mydig.py www.netflix.com A
+Input: python mydig.py www.netflix.com A
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:
@@ -115,7 +115,7 @@ WHEN:  2022-09-16 16:32:32.073489
 MSG SIZE rcvd:  709
 ==================================================================================
 Case: Resolve in multiple hops
-Input: ./mydig.py google.co.jp A
+Input: python mydig.py google.co.jp A
 ----------------------------------------------------------------------------------
 Output:
 QUESTION SECTION:

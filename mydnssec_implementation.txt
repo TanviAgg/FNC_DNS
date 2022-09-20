@@ -61,6 +61,23 @@ Example: verisigninc.com.
 11. Return the DNS response.
 
 ==============================================================================================
+IMPLEMENTATION DETAILS
+==============================================================================================
+1. To get the public KSK from DNSKEY record which contains PubKSK and PubZSK,
+    we need to find the key with flags 257 as this is the key that corresponds to the KSK.
+2. To verify the signatures (RRSig) I have used the validation API from dnspython:
+    dns.dnssec.validate(rrset=rrset, rrsigset=rrsig, keys={dnskey.name: dnskey}).
+    We provide the RRSet, RRSig and the DNSKey. It throws an exception if none of the keys
+    can validate the given RRSig against the RRset.
+3. To verify the DS/A record digest I have used the following API from dnspython:
+    dns.dnssec.make_ds(name=domain, key=pubkey, algorithm=hash_alg).
+    Given the domain name and public key, we create a DS record using the given hashing algorithm.
+    Then we compare the value of the DS record from parent and the one we made from the child's PubKSK.
+    By default SHA256 is used for the root anchors. However, in case a record uses SHA1, we use that.
+4. verify_record_and_zone method in mydnssec.py contains the core logic for DNSSec validation for one level.
+    More comments have been added in the code to explain the steps.
+
+==============================================================================================
 RESOLVER RESPONSES
 ==============================================================================================
 Case: DNSSec IS SUPPORTED AND VERIFIED
